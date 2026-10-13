@@ -127,8 +127,7 @@ def mean_squared_error_sgd (y, tx, initial_w, max_iters, gamma):
             losses.append(loss)
             
     return losses[-1], ws[-1]
-            
-            
+
 
 def compute_loss(y, tx, w):
     """Calculate the mse loss.
@@ -163,4 +162,28 @@ def least_squares(y, tx):
     w = np.linalg.solve(a, b)
     mse = compute_loss(y, tx, w)
     return w, mse
+
+def ridge_regression(y, tx, lambda_):
+    """Ridge regression using normal equations.
     
+        Args:
+            y: numpy array of shape (N, ), target values.
+            tx: numpy array of shape (N, D), feature matrix.
+            lambda_: regularization parameter.
+    
+        Returns:
+            w: optimal weights, numpy array of shape (D, ).
+            loss: mean squared error without the regularization penalty.
+        """
+    N = len(y)
+    lambda_prime = 2 * N * lambda_
+
+    a = tx.T.dot(tx) + lambda_prime * np.eye(tx.shape[1])
+    b = tx.T.dot(y)
+
+    w = np.linalg.solve(a, b)
+    
+    err = y - tx.dot(w)
+    loss = calculate_mse(err)
+
+    return w, loss
