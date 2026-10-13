@@ -2,7 +2,12 @@ import numpy as np
 
 
 def calculate_mse(err):
-    """Calculate the mse for vector err."""
+    """Calculate the mse for vector err.
+    Args:
+        e: numpy array of shape (N,), N is the number of samples.
+    returns: 
+        mse: scalar    
+    """
     return 1 / 2 * np.mean(err**2)
 
 def compute_gradient(y, tx, w):
@@ -120,5 +125,42 @@ def mean_squared_error_sgd (y, tx, initial_w, max_iters, gamma):
             # store w and loss
             ws.append(w)
             losses.append(loss)
-
+            
     return losses[-1], ws[-1]
+            
+            
+
+def compute_loss(y, tx, w):
+    """Calculate the mse loss.
+
+    Args:
+        y: numpy array of shape (N,), N is the number of samples.
+        tx: numpy array of shape (N,D), D is the number of features.
+        w: numpy array of shape(D,)
+
+    Returns:
+        Scalar
+
+    """
+    e = y - tx.dot(w)
+    return calculate_mse(e) 
+            
+def least_squares(y, tx):
+    """Calculate the least squares solution.
+       returns mse, and optimal weights.
+
+    Args:
+        y: numpy array of shape (N,), N is the number of samples.
+        tx: numpy array of shape (N,D), D is the number of features.
+
+    Returns:
+        w: optimal weights, numpy array of shape(D,), D is the number of features.
+        mse: scalar.
+    """
+    
+    a = tx.T.dot(tx)
+    b = tx.T.dot(y)
+    w = np.linalg.solve(a, b)
+    mse = compute_loss(y, tx, w)
+    return w, mse
+    
