@@ -187,3 +187,98 @@ def ridge_regression(y, tx, lambda_):
     loss = calculate_mse(err)
 
     return w, loss
+
+def sigmoid(t):
+    """apply sigmoid function on t.
+
+    Args:
+        t: scalar or numpy array
+
+    Returns:
+        scalar or numpy array
+
+    >>> sigmoid(np.array([0.1]))
+    array([0.52497919])
+    >>> sigmoid(np.array([0.1, 0.1]))
+    array([0.52497919, 0.52497919])
+    """
+    return (1 + np.exp(-t))**(-1)
+
+def compute_gradient_logistic (y, tx, w):
+    """compute the gradient of loss.
+
+    Args:
+        y:  shape=(N, 1)
+        tx: shape=(N, D)
+        w:  shape=(D, 1)
+
+    Returns:
+        a vector of shape (D, 1)
+    """
+    pred = sigmoid(tx.dot(w))
+    grad = tx.T.dot(pred-y) * (1/y.shape[0])
+
+    return grad
+
+def  compute_logistic_loss (y, tx, w):
+    """compute the cost by negative log likelihood.
+
+    Args:
+        y:  shape=(N, 1)
+        tx: shape=(N, D)
+        w:  shape=(D, 1)
+
+    Returns:
+        a non-negative loss
+    """
+
+    assert y.shape[0] == tx.shape[0]
+    assert tx.shape[1] == w.shape[0]
+
+    pred = sigmoid(tx.dot(w))
+    loss = y.T.dot(np.log(pred)) + (1 - y).T.dot(np.log(1 - pred))
+    
+    return np.squeeze(-loss).item() * (1 / y.shape[0])
+
+
+
+def logistic_regression (y, tx, initial_w, max_iters, gamma):
+    """Logistic regression using gradient descent (y in {0, 1}).
+
+    Returns:
+        w: the last weight vector
+        loss: the corresponding loss (negative log-likelihood, averaged over N)
+    """
+    
+    w = initial_w
+    losses = []
+    ws = [initial_w]
+    for _ in range(max_iters):
+        grad = compute_gradient_logistic (y, tx, w)
+        w -= gamma * grad
+        loss = compute_logistic_loss(y, tx, w)
+        losses.append(loss)
+        ws.append(w)
+
+    return ws[-1], losses[-1]
+
+def reg_logistic_regression(y, tx, lambda_ , initial_w, max_iters, gamma):
+    """
+    Logistic regression using gradient descent (y in {0, 1}) and a regularization term.
+
+    Returns:
+        w: the last weight vector
+        loss: the corresponding loss (negative log-likelihood, averaged over N)
+    """
+    
+    w = initial_w
+    losses = []
+    ws = [initial_w]
+    for _ in range(max_iters):
+        grad = compute_gradient_logistic (y, tx, w) + 2 * lambda_ * w
+        w -= gamma * grad
+        loss = compute_logistic_loss(y, tx, w)
+        losses.append(loss)
+        ws.append(w)
+    
+    return ws[-1], losses[-1]
