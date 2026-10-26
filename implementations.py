@@ -80,7 +80,7 @@ def mean_squared_error_gd(y, tx, initial_w, max_iters, gamma):
             for each iteration of GD (as well as the final weights)
     """
     
-    ws = initial_w
+    w = initial_w
     for n_iter in range(max_iters):
         grad, err = compute_gradient(y, tx, w)
         w = w - gamma * grad
