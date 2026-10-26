@@ -1,203 +1,334 @@
-"""
-Entraînement, validation croisée et sélection d'hyperparamètres.
+"""Step 4-5: baselines, class-imbalance handling and hyper-parameter search.
 
-à valider avec preprocessing :
-    tx_train : np.ndarray (N, D)   features nettoyées, standardisées, sans NaN,
-                                   avec colonne de biais (1.0) déjà ajoutée
-    y_train  : np.ndarray (N,)     labels en {-1, +1}
-    tx_test  : np.ndarray (M, D)   mêmes transformations que le train
-    ids_test : np.ndarray (M,)     identifiants du test (pour la soumission)
-
+Conventions
+-----------
+* y is converted to {0, 1} for every model (the course functions expect that);
+  we only go back to {-1, 1} when writing the submission.
+* A "model" is a pair of functions:
+      fit(y01, tx)   -> w
+      score(tx, w)   -> real-valued score (linear output or probability)
+  A prediction is then ``score >= threshold``.
+* Cross-validation is stratified (same % of sick people in every fold) and
+  returns out-of-fold (OOF) scores, so the decision threshold can be tuned on them.
 """
+
 import numpy as np
 
-from implementations import ridge_regression, least_squares
+from implementations import (
+    least_squares,
+    ridge_regression,
+    logistic_regression,
+    reg_logistic_regression,
+)
+from metrics import compute_metrics
+from cross_validation import cross_validation
 
-# --------------------------------------------------------------------------
-# Utilitaires labels / métriques
-# --------------------------------------------------------------------------
+SEED = 1
+LOG_FILE = "results_log.txt"
+
+
+# ----------------------------------------------------------------------
+# Label helpers
 
 def to_01(y):
-    """{-1, +1} -> {0, 1} (nécessaire pour la régression logistique)."""
-    return (y + 1) / 2
+    """{-1, 1} -> {0, 1}."""
+    return (y == 1).astype(float)
 
 
 def to_pm1(y01):
-    """{0, 1} -> {-1, +1} (format attendu par la soumission)."""
-    return 2 * y01 - 1
+    """{0, 1} -> {-1, 1}."""
+    return np.where(y01 == 1, 1, -1)
 
 
-def metrics(y_true01, y_pred01):
-    """Accuracy, precision, recall, F1 (classe positive = malade)."""
-    tp = np.sum((y_pred01 == 1) & (y_true01 == 1))
-    fp = np.sum((y_pred01 == 1) & (y_true01 == 0))
-    fn = np.sum((y_pred01 == 0) & (y_true01 == 1))
-    acc = np.mean(y_pred01 == y_true01)
-    prec = tp / (tp + fp) if tp + fp > 0 else 0.0
-    rec = tp / (tp + fn) if tp + fn > 0 else 0.0
-    f1 = 2 * prec * rec / (prec + rec) if prec + rec > 0 else 0.0
-    return {"acc": acc, "prec": prec, "rec": rec, "f1": f1}
+# ----------------------------------------------------------------------
+# Cross-validation (stratified, NumPy only)
 
 
-def best_threshold(scores, y01, n_thresholds=60):
-    """Cherche le seuil sur les scores qui maximise le F1.
+def stratified_subsample(y01, n_max, seed=SEED):
+    """Indices of a stratified subsample of size ~n_max (to speed up grid searches)."""
+    if n_max is None or n_max >= len(y01):
+        return np.arange(len(y01))
+    rng = np.random.RandomState(seed)
+    frac = n_max / len(y01)
+    idx = []
+    for cls in (0, 1):
+        c = np.where(y01 == cls)[0]
+        idx.append(rng.choice(c, size=int(len(c) * frac), replace=False))
+    return np.sort(np.concatenate(idx))
 
-    Les données sont très déséquilibrées (~9% de positifs), donc le seuil par
-    défaut (0.5 ou 0) est quasiment toujours sous-optimal pour le F1.
-    On balaie les quantiles 50% -> 99.5% des scores.
+# ----------------------------------------------------------------------
+# Threshold tuning (maximise F1)
+
+def best_threshold_f1(y01, scores):
+    """Find the threshold maximising F1 (prediction = score >= threshold).
+
+    Vectorised: sort by decreasing score; if we predict the top-k as positive,
+    F1 = 2*TP / (k + P) where P is the total number of positives.
     """
-    candidates = np.quantile(scores, np.linspace(0.5, 0.995, n_thresholds))
-    best_t, best_f1 = candidates[0], -1.0
-    for t in candidates:
-        f1 = metrics(y01, (scores >= t).astype(int))["f1"]
-        if f1 > best_f1:
-            best_t, best_f1 = t, f1
-    return best_t, best_f1
+    order = np.argsort(-scores)
+    s, ys = scores[order], y01[order]
+    tp = np.cumsum(ys)
+    k = np.arange(1, len(ys) + 1)
+    f1 = 2 * tp / (k + ys.sum())
+    i = int(np.argmax(f1))
+    thr = (s[i] + s[i + 1]) / 2 if i < len(s) - 1 else s[i]
+    return thr, f1[i]
 
-# --------------------------------------------------------------------------
-# Modèles (wrappers autour de implementations.py + variante pondérée)
-# --------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------
+# Models: (fit, score) factories
 
 def stable_sigmoid(t):
-    """Sigmoïde sans overflow."""
+    """Sigmoid without overflow warnings."""
     return 1.0 / (1.0 + np.exp(-np.clip(t, -30, 30)))
 
 
-def weighted_reg_logistic(y01, tx, lambda_, initial_w, max_iters, gamma, pos_weight=1.0):
-    """Régression logistique régularisée L2 avec poids sur la classe positive.
-
-    Modification "maison" de reg_logistic_regression : chaque exemple positif
-    compte pos_weight fois plus, ce qui compense le déséquilibre des classes.
-    Retourne (w, loss) ; la loss est la NLL non pondérée, sans pénalité.
-    """
-    w = initial_w.copy()  # ne pas modifier initial_w en place
-    sample_w = np.where(y01 == 1, pos_weight, 1.0)
-    n = len(y01)
-    for _ in range(max_iters):
-        pred = stable_sigmoid(tx @ w)
-        grad = tx.T @ (sample_w * (pred - y01)) / n + 2 * lambda_ * w
-        w = w - gamma * grad
-    pred = np.clip(stable_sigmoid(tx @ w), 1e-12, 1 - 1e-12)
-    loss = -np.mean(y01 * np.log(pred) + (1 - y01) * np.log(1 - pred))
-    return w, loss
-
-
-def fit_ridge(y_pm1, tx, lambda_):
-    """Ridge sur labels {-1,+1}. Retourne w."""
-    w, _ = ridge_regression(y_pm1, tx, lambda_)
-    return w
-
-
-def fit_logistic(y01, tx, lambda_, gamma, max_iters, pos_weight):
-    w0 = np.zeros(tx.shape[1])
-    w, _ = weighted_reg_logistic(y01, tx, lambda_, w0, max_iters, gamma, pos_weight)
-    return w
-
-
-def score_linear(tx, w):
+def linear_score(tx, w):
     return tx @ w
 
 
-def score_logistic(tx, w):
+def prob_score(tx, w):
     return stable_sigmoid(tx @ w)
 
-# --------------------------------------------------------------------------
-# Validation croisée
-# --------------------------------------------------------------------------
 
-def build_k_indices(n, k_fold, seed=1):
-    """Découpe aléatoire des indices en k_fold blocs."""
-    rng = np.random.RandomState(seed)
-    idx = rng.permutation(n)
-    return np.array_split(idx, k_fold)
+def majority_model():
+    """Always predicts the majority class (w = 0 -> constant score)."""
+    return (lambda y, tx: np.zeros(tx.shape[1])), linear_score
 
 
-def cross_validate(fit_fn, score_fn, y_pm1, tx, k_fold=5, seed=1):
-    """CV k-fold. Retourne (F1 optimal sur scores out-of-fold, seuil, metrics).
+def least_squares_model():
+    def fit(y, tx):
+        try:
+            return least_squares(y, tx)[0]
+        except np.linalg.LinAlgError:  # singular tx.T @ tx (e.g. collinear one-hot)
+            return ridge_regression(y, tx, 1e-8)[0]
 
-    fit_fn(y_pm1_train, tx_train) -> w
-    score_fn(tx_val, w)           -> scores continus
+    return fit, linear_score
 
-    On concatène les scores out-of-fold puis on choisit UN seuil global :
-    plus stable que d'optimiser le seuil fold par fold.
+
+def ridge_model(lambda_):
+    return (lambda y, tx: ridge_regression(y, tx, lambda_)[0]), linear_score
+
+
+def logistic_model(max_iters, gamma):
+    # np.zeros created at each call: the course functions modify initial_w in place
+    def fit(y, tx):
+        return logistic_regression(y, tx, np.zeros(tx.shape[1]), max_iters, gamma)[0]
+
+    return fit, prob_score
+
+
+def reg_logistic_model(lambda_, max_iters, gamma):
+    def fit(y, tx):
+        w0 = np.zeros(tx.shape[1])
+        return reg_logistic_regression(y, tx, lambda_, w0, max_iters, gamma)[0]
+
+    return fit, prob_score
+
+
+def weighted_logistic_gd(y, tx, lambda_, max_iters, gamma, pos_weight):
+    """Logistic regression (GD) with a larger weight on the positive class.
+
+    Loss = mean_i c_i * NLL_i + lambda_ * ||w||^2, with c_i = pos_weight if y_i = 1
+    else 1 (normalised so that mean(c) = 1, which keeps gamma on the same scale).
+    The bias (w[0]) is not regularised.
     """
-    folds = build_k_indices(len(y_pm1), k_fold, seed)
-    oof = np.zeros(len(y_pm1))
-    for k in range(k_fold):
-        val_idx = folds[k]
-        train_idx = np.concatenate([folds[j] for j in range(k_fold) if j != k])
-        w = fit_fn(y_pm1[train_idx], tx[train_idx])
-        oof[val_idx] = score_fn(tx[val_idx], w)
-    y01 = to_01(y_pm1).astype(int)
-    thr, f1 = best_threshold(oof, y01)
-    return f1, thr, metrics(y01, (oof >= thr).astype(int))
+    c = np.where(y == 1, pos_weight, 1.0)
+    c = c / c.mean()
+    w = np.zeros(tx.shape[1])
+    reg_mask = np.ones_like(w)
+    reg_mask[0] = 0.0
+    for _ in range(max_iters):
+        grad = tx.T @ (c * (stable_sigmoid(tx @ w) - y)) / len(y)
+        grad += 2 * lambda_ * reg_mask * w
+        w = w - gamma * grad
+    return w
 
 
-# --------------------------------------------------------------------------
-# Recherche d'hyperparamètres
-# --------------------------------------------------------------------------
+def weighted_logistic_model(lambda_, max_iters, gamma, pos_weight):
+    def fit(y, tx):
+        return weighted_logistic_gd(y, tx, lambda_, max_iters, gamma, pos_weight)
+
+    return fit, prob_score
 
 
-def tune_ridge(y_pm1, tx, lambdas, k_fold=5, seed=1):
-    results = []
+def with_undersampling(fit, ratio=1.0, seed=SEED):
+    """Wrap a fit function: keep all positives and `ratio` x as many negatives.
+
+    Applied INSIDE each training fold only (never on validation data).
+    """
+
+    def new_fit(y, tx):
+        rng = np.random.RandomState(seed)
+        pos = np.where(y == 1)[0]
+        neg = np.where(y == 0)[0]
+        neg = rng.choice(neg, size=min(len(neg), int(ratio * len(pos))), replace=False)
+        idx = np.concatenate([pos, neg])
+        return fit(y[idx], tx[idx])
+
+    return new_fit
+
+
+# ----------------------------------------------------------------------
+# Evaluation + logging (feeds the ablation study)
+
+def log_result(name, res, log_file=LOG_FILE):
+    line = (
+        f"{name} | thr=0.5: acc={res['acc@0.5']:.4f} f1={res['f1@0.5']:.4f} "
+        f"| best thr={res['thr']:.4f}: f1={res['f1']:.4f} "
+        f"prec={res['precision']:.4f} rec={res['recall']:.4f} acc={res['accuracy']:.4f}"
+    )
+    print(line)
+    with open(log_file, "a") as f:
+        f.write(line + "\n")
+
+
+def evaluate_model(name, fit, score, y01, tx, k_fold=5, seed=SEED, log=True):
+    """CV a model; report metrics at the default threshold (0.5) and at the best-F1 one.
+
+    Note: the best threshold is chosen on the pooled OOF scores, so the F1 at
+    that threshold is very slightly optimistic (1 parameter tuned on 328k points).
+    """
+    oof = cross_validation(y01, tx, k_fold, seed, fit, score)
+    m05 = compute_metrics(y01, (oof >= 0.5).astype(int))
+    thr, _ = best_threshold_f1(y01, oof)
+    mbest = compute_metrics(y01, (oof >= thr).astype(int))
+    res = {
+        "acc@0.5": m05["accuracy"],
+        "f1@0.5": m05["f1"],
+        "thr": thr,
+        **mbest,
+    }
+    if log:
+        log_result(name, res)
+    return res, oof
+
+
+# ----------------------------------------------------------------------
+# Step 4: baselines
+
+def run_baselines(y01, tx, k_fold=5, lambdas=np.logspace(-6, 0, 7)):
+    """Majority, least squares, ridge, logistic, regularised logistic."""
+    results = {}
+    results["majority"], _ = evaluate_model("majority", *majority_model(), y01, tx, k_fold)
+    results["least_squares"], _ = evaluate_model(
+        "least_squares", *least_squares_model(), y01, tx, k_fold
+    )
     for lam in lambdas:
-        f1, thr, m = cross_validate(
-            lambda y, x: fit_ridge(y, x, lam), score_linear, y_pm1, tx, k_fold, seed
+        results[f"ridge_{lam:.0e}"], _ = evaluate_model(
+            f"ridge lambda={lam:.0e}", *ridge_model(lam), y01, tx, k_fold
         )
-        print(f"[ridge] lambda={lam:.1e}  F1={f1:.4f}  rec={m['rec']:.3f}  prec={m['prec']:.3f}")
-        results.append({"lambda_": lam, "f1": f1, "thr": thr})
-    return max(results, key=lambda r: r["f1"]), results
+    results["logistic"], _ = evaluate_model(
+        "logistic gamma=0.1 iters=300", *logistic_model(300, 0.1), y01, tx, k_fold
+    )
+    results["reg_logistic"], _ = evaluate_model(
+        "reg_logistic lambda=1e-4 gamma=0.1 iters=300",
+        *reg_logistic_model(1e-4, 300, 0.1),
+        y01,
+        tx,
+        k_fold,
+    )
+    return results
 
 
-def tune_logistic(y_pm1, tx, lambdas, gammas, pos_weights, max_iters=300, k_fold=5, seed=1):
-    results = []
+# ----------------------------------------------------------------------
+# Step 5: imbalance handling + grid search (hyper-parameters by CV)
+
+def grid_search_weighted_logistic(
+    y01,
+    tx,
+    lambdas=np.logspace(-6, -1, 6),
+    gammas=(0.1, 0.3),
+    pos_weights=(1.0, 3.0, 8.0),
+    max_iters=300,
+    k_fold=5,
+    n_max=60000,
+):
+    """Grid search for the (class-weighted) regularised logistic regression.
+
+    Each config is scored by the best-F1 over OOF scores. `n_max` runs the search
+    on a stratified subsample to save time (set to None to use everything).
+
+    Returns:
+        best config (dict), list of all (config, f1)
+    """
+    sub = stratified_subsample(y01, n_max)
+    y_s, tx_s = y01[sub], tx[sub]
+    all_res, best = [], None
     for lam in lambdas:
-        for gam in gammas:
+        for gamma in gammas:
             for pw in pos_weights:
-                f1, thr, m = cross_validate(
-                    lambda y, x: fit_logistic(to_01(y), x, lam, gam, max_iters, pw),
-                    score_logistic, y_pm1, tx, k_fold, seed,
+                fit, score = weighted_logistic_model(lam, max_iters, gamma, pw)
+                res, _ = evaluate_model(
+                    f"wlogistic lambda={lam:.0e} gamma={gamma} pos_w={pw}",
+                    fit,
+                    score,
+                    y_s,
+                    tx_s,
+                    k_fold,
                 )
-                print(f"[logreg] lambda={lam:.1e} gamma={gam} pw={pw}  F1={f1:.4f}")
-                results.append(
-                    {"lambda_": lam, "gamma": gam, "pos_weight": pw, "f1": f1, "thr": thr}
-                )
-    return max(results, key=lambda r: r["f1"]), results
+                cfg = dict(lambda_=lam, gamma=gamma, pos_weight=pw, max_iters=max_iters)
+                all_res.append((cfg, res["f1"]))
+                if best is None or res["f1"] > best[1]:
+                    best = (cfg, res["f1"], res["thr"])
+    print(f"\nBest config: {best[0]} | F1={best[1]:.4f} | thr={best[2]:.4f}")
+    return best[0], all_res
 
 
-# --------------------------------------------------------------------------
-# Entraînement final + prédiction
-# --------------------------------------------------------------------------
+def compare_imbalance_strategies(y01, tx, cfg, k_fold=5):
+    """Mini ablation on the full data: baseline vs weights vs undersampling."""
+    lam, gamma, it = cfg["lambda_"], cfg["gamma"], cfg["max_iters"]
+    evaluate_model(
+        "[ablation] reg_logistic, thr=0.5 only meaningful",
+        *reg_logistic_model(lam, it, gamma),
+        y01,
+        tx,
+        k_fold,
+    )
+    evaluate_model(
+        f"[ablation] weighted logistic pos_w={cfg['pos_weight']}",
+        *weighted_logistic_model(lam, it, gamma, cfg["pos_weight"]),
+        y01,
+        tx,
+        k_fold,
+    )
+    fit, score = reg_logistic_model(lam, it, gamma)
+    evaluate_model(
+        "[ablation] reg_logistic + undersampling 1:1",
+        with_undersampling(fit, 1.0),
+        score,
+        y01,
+        tx,
+        k_fold,
+    )
 
 
-def train_and_predict(y_pm1, tx_train, tx_test, best, model="logistic", max_iters=300):
-    """Réentraîne sur TOUT le train avec les meilleurs hyperparamètres,
-    applique le seuil trouvé en CV, et renvoie des prédictions en {-1,+1}."""
-    if model == "ridge":
-        w = fit_ridge(y_pm1, tx_train, best["lambda_"])
-        scores = score_linear(tx_test, w)
-    else:
-        w = fit_logistic(
-            to_01(y_pm1), tx_train, best["lambda_"], best["gamma"], max_iters, best["pos_weight"]
-        )
-        scores = score_logistic(tx_test, w)
-    y01 = (scores >= best["thr"]).astype(int)
-    return to_pm1(y01), w
+# ----------------------------------------------------------------------
+# Final fit + prediction (used by run.py)
+
+def fit_and_predict(cfg, y01, tx_train, tx_test, k_fold=5):
+    """Tune the threshold on OOF scores, retrain on ALL train, predict test in {-1, 1}."""
+    fit, score = weighted_logistic_model(
+        cfg["lambda_"], cfg["max_iters"], cfg["gamma"], cfg["pos_weight"]
+    )
+    oof = cross_validation(y01, tx_train, k_fold, SEED, fit, score)
+    thr, f1 = best_threshold_f1(y01, oof)
+    print(f"CV F1 = {f1:.4f} at threshold {thr:.4f}")
+    w = fit(y01, tx_train)
+    return to_pm1((score(tx_test, w) >= thr).astype(int))
 
 
+# ----------------------------------------------------------------------
 if __name__ == "__main__":
-    # Exemple d'utilisation une fois le preprocessing prêt :
-    #
-    # from preprocessing import preprocess          # <- le travail de tes amies
-    # from helpers import load_csv_data, create_csv_submission
-    # x_train, x_test, y_train, train_ids, test_ids = load_csv_data("data/")
-    # tx_train, tx_test = preprocess(x_train, x_test)
-    #
-    # best_ridge, _ = tune_ridge(y_train, tx_train, np.logspace(-8, -2, 7))
-    # best_log, _ = tune_logistic(
-    #     y_train, tx_train,
-    #     lambdas=[1e-6, 1e-4], gammas=[0.5, 1.0], pos_weights=[1, 3, 6],
-    # )
-    # y_pred, w = train_and_predict(y_train, tx_train, tx_test, best_log)
-    # create_csv_submission(test_ids, y_pred, "submission.csv")
-    pass
+    from helpers import load_csv_data
+    from preprocessing import preprocess  # -> (tx_train, tx_test), bias column included
+
+    np.random.seed(SEED)
+    x_train, x_test, y_train, train_ids, test_ids = load_csv_data("data/")
+    y01 = to_01(y_train)
+    tx_train, tx_test = preprocess(x_train, x_test)
+
+    print(f"% positives: {100 * y01.mean():.2f}")
+    run_baselines(y01, tx_train)
+    best_cfg, _ = grid_search_weighted_logistic(y01, tx_train)
+    compare_imbalance_strategies(y01, tx_train, best_cfg)

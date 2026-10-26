@@ -165,3 +165,16 @@ def most_correlated_features(x, y, n_top=30):
     plt.ylabel("Correlation")
     plt.title("highest correlations")
     plt.show()
+
+
+def preprocess(x_train, x_test, missing_threshold=0.5):
+    """Apply the full preprocessing pipeline (statistics computed on train only).
+
+    Returns:
+        tx_train: shape=(N_train, D'+1), standardized, with bias column
+        tx_test:  shape=(N_test, D'+1)
+    """
+    x_train, x_test, _ = drop_useless_columns(x_train, x_test, missing_threshold)
+    x_train, x_test = impute_by_median(x_train, x_test)
+    x_train, x_test = standardize(x_train, x_test)
+    return add_bias_term(x_train, x_test)

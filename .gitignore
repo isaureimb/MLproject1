@@ -229,3 +229,8 @@ data_processed/
 __pycache__/
 *.pyc
 .venv/
+# Projet
+data/
+*.zip
+.DS_Store
+results_log.txt
