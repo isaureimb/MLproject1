@@ -80,7 +80,7 @@ def mean_squared_error_gd(y, tx, initial_w, max_iters, gamma):
             for each iteration of GD (as well as the final weights)
     """
     
-    ws = [initial_w]
+    ws = initial_w
     for n_iter in range(max_iters):
         grad, err = compute_gradient(y, tx, w)
         w = w - gamma * grad
@@ -223,7 +223,7 @@ def  compute_logistic_loss (y, tx, w):
     pred = sigmoid(tx.dot(w))
     loss = y.T.dot(np.log(pred)) + (1 - y).T.dot(np.log(1 - pred))
     
-    return np.squeeze(-loss).item() * (1 / y.shape[0])
+    return np.squeeze(-loss) / y.shape[0]
 
 
 
