@@ -218,3 +218,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+dataset_to_release/
+data_processed/
+*.csv
+*.npz
+*.npy
+
+# Fichiers cache Python
+__pycache__/
+*.pyc
+.venv/
