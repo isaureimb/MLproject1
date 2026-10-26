@@ -1,22 +1,5 @@
 import numpy as np
 from helpers import load_csv_data
-r"""
-data_path = (
-    r"C:\Users\lilar\Documents\Ma1\machine learning\MLproject1\dataset_to_release\dataset"
-)
-x_train, x_test, y_train, train_ids, test_ids = load_csv_data(data_path)
-np.savez_compressed("data_loaded.npz", x_train=x_train, y_train=y_train, x_test=x_test, train_ids=train_ids, test_ids=test_ids)
-"""
-
-
-#to access to the data without running again --> 
-
-data = np.load("data_loaded.npz")
-x_train = data["x_train"]
-y_train = data["y_train"]
-x_test = data["x_test"]
-train_ids = data["train_ids"]
-test_ids = data["test_ids"]
 
 
 def explore_dimensions(y_train, x_train, x_test=None):
@@ -48,4 +31,3 @@ def explore_dimensions(y_train, x_train, x_test=None):
 
     return N_train, D
 
-N, D = explore_dimensions(y_train, x_train, x_test)
