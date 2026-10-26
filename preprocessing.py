@@ -1,6 +1,4 @@
 import numpy as np
-from helpers import load_csv_data
-
 
 def explore_dimensions(y_train, x_train, x_test=None):
     """Compute and display dataset dimensions, shapes, and class distribution.
@@ -31,3 +29,4 @@ def explore_dimensions(y_train, x_train, x_test=None):
 
     return N_train, D
 
+N, D = explore_dimensions(y_train, x_train, x_test)
