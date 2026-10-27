@@ -211,7 +211,7 @@ def run_baselines(y01, tx, k_fold=5, lambdas=np.logspace(-6, 0, 7)):
     """Majority, least squares, ridge, logistic, regularised logistic."""
     results = {}
     results["majority"], _ = evaluate_model("majority", *majority_model(), y01, tx, k_fold)
-    results["least_squares"], _ = evaluate_model(r
+    results["least_squares"], _ = evaluate_model(
         "least_squares", *least_squares_model(), y01, tx, k_fold
     )
     for lam in lambdas:
@@ -229,6 +229,35 @@ def run_baselines(y01, tx, k_fold=5, lambdas=np.logspace(-6, 0, 7)):
         k_fold,
     )
     return results
+
+import matplotlib.pyplot as plt
+
+def plot_baselines_summary(results, save_path="baselines_comparison.png"):
+    """make a bar plot comparing the baseline models on accuracy and F1-score."""
+    names = list(results.keys())
+    acc_05 = [results[m]["acc@0.5"] for m in names]
+    f1_05 = [results[m]["f1@0.5"] for m in names]
+    f1_best = [results[m]["f1"] for m in names]
+
+    x = np.arange(len(names))
+    width = 0.25
+
+    plt.figure(figsize=(12, 6))
+    plt.bar(x - width, acc_05, width, label="Accuracy (thr=0.5)", color="#4C72B0")
+    plt.bar(x, f1_05, width, label="F1-score (thr=0.5)", color="#C44E52")
+    plt.bar(x + width, f1_best, width, label="F1-score (best thr)", color="#55A868")
+
+    plt.ylabel("Score")
+    plt.title("Comparison of Baseline Models (5-fold CV)")
+    plt.xticks(x, names, rotation=35, ha="right", fontsize=9)
+    plt.ylim(0, 1.05)
+    plt.grid(axis="y", linestyle="--", alpha=0.6)
+    plt.legend(loc="upper right")
+    plt.tight_layout()
+
+    plt.savefig(save_path, dpi=300)
+    print(f"Graph saved as : {save_path}")
+    plt.show()    
 
 
 # ----------------------------------------------------------------------
