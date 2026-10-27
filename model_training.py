@@ -211,7 +211,7 @@ def run_baselines(y01, tx, k_fold=5, lambdas=np.logspace(-6, 0, 7)):
     """Majority, least squares, ridge, logistic, regularised logistic."""
     results = {}
     results["majority"], _ = evaluate_model("majority", *majority_model(), y01, tx, k_fold)
-    results["least_squares"], _ = evaluate_model(r
+    results["least_squares"], _ = evaluate_model(
         "least_squares", *least_squares_model(), y01, tx, k_fold
     )
     for lam in lambdas:
