@@ -30,6 +30,74 @@ def explore_dimensions(y_train, x_train, x_test=None):
 
     return N_train, D
 
+import numpy as np
+
+
+def clean_special_codes_auto(
+    x_train,
+    x_test,
+    candidate_codes=(7, 9, 77, 88, 99, 777, 999, 7777, 9999),
+    gap_ratio=1.5,
+):
+    """Detect and replace BRFSS sentinel/special response codes with NaN.
+
+    Decision rules per feature (computed strictly on x_train):
+    1. candidate >= 77: considered an invalid sentinel if it exceeds the maximum
+       of the other non-sentinel values by at least `gap_ratio` (e.g. 1.5x).
+    2. candidate in (7, 9): considered a refusal code if the remaining values
+       are strictly categorical on a narrow scale (max <= 5).
+
+    Args:
+        x_train: np.ndarray, shape=(N_train, D)
+        x_test:  np.ndarray, shape=(N_test, D)
+        candidate_codes: iterable of suspected BRFSS survey codes
+        gap_ratio: float, threshold factor for the gap analysis
+
+    Returns:
+        x_train_clean: np.ndarray, shape=(N_train, D)
+        x_test_clean:  np.ndarray, shape=(N_test, D)
+    """
+    
+    #assert (x_train.ndim == 2 and x_test.ndim == 2), "x_train and x_test must be 2D arrays"
+    #assert (x_train.shape[1] == x_test.shape[1]), "Feature count mismatch between train and test"
+
+    x_train_clean = x_train.copy().astype(float)
+    x_test_clean = x_test.copy().astype(float)
+
+    n_features = x_train.shape[1]
+
+    for j in range(n_features):
+        col_train = x_train[:, j]
+        #take only the valid values of the column
+        valid_train = col_train[~np.isnan(col_train)] 
+        
+        #if there is only NaN values in the column, skip it
+        if len(valid_train) == 0: 
+            continue
+
+        unique_vals = set(np.unique(valid_train))
+
+        for code in candidate_codes:
+            if code not in unique_vals:
+                continue
+
+            # values in the column that are not the current candidate code
+            remaining = valid_train[valid_train != code]
+            if len(remaining) == 0:
+                continue
+
+            max_rem = np.max(remaining)
+
+            # rules for detecting sentinel codes 
+            is_large_gap = (code >= 77) and (code > max_rem * gap_ratio)
+            is_categorical_refusal = (code in (7, 9)) and (max_rem <= 5)
+
+            if is_large_gap or is_categorical_refusal:
+                x_train_clean[x_train_clean[:, j] == code, j] = np.nan
+                x_test_clean[x_test_clean[:, j] == code, j] = np.nan
+
+    return x_train_clean, x_test_clean
+                
 
 def drop_useless_columns(x_train, x_test, missing_threshold=0.5, var_threshold=1e-8):
     """Drop columns with excessive NaN ratios or near-zero variance based on train set.
@@ -174,6 +242,7 @@ def preprocess(x_train, x_test, missing_threshold=0.5):
         tx_train: shape=(N_train, D'+1), standardized, with bias column
         tx_test:  shape=(N_test, D'+1)
     """
+    x_train, x_test = clean_special_codes_auto(x_train, x_test)
     x_train, x_test, _ = drop_useless_columns(x_train, x_test, missing_threshold)
     x_train, x_test = impute_by_median(x_train, x_test)
     x_train, x_test = standardize(x_train, x_test)
