@@ -211,7 +211,7 @@ def run_baselines(y01, tx, k_fold=5, lambdas=np.logspace(-6, 0, 7)):
     """Majority, least squares, ridge, logistic, regularised logistic."""
     results = {}
     results["majority"], _ = evaluate_model("majority", *majority_model(), y01, tx, k_fold)
-    results["least_squares"], _ = evaluate_model(
+    results["least_squares"], _ = evaluate_model(r
         "least_squares", *least_squares_model(), y01, tx, k_fold
     )
     for lam in lambdas:
@@ -318,17 +318,3 @@ def fit_and_predict(cfg, y01, tx_train, tx_test, k_fold=5):
     return to_pm1((score(tx_test, w) >= thr).astype(int))
 
 
-# ----------------------------------------------------------------------
-if __name__ == "__main__":
-    from helpers import load_csv_data
-    from preprocessing import preprocess  # -> (tx_train, tx_test), bias column included
-
-    np.random.seed(SEED)
-    x_train, x_test, y_train, train_ids, test_ids = load_csv_data("data/")
-    y01 = to_01(y_train)
-    tx_train, tx_test = preprocess(x_train, x_test)
-
-    print(f"% positives: {100 * y01.mean():.2f}")
-    run_baselines(y01, tx_train)
-    best_cfg, _ = grid_search_weighted_logistic(y01, tx_train)
-    compare_imbalance_strategies(y01, tx_train, best_cfg)
