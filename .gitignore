@@ -229,8 +229,18 @@ data_processed/
 __pycache__/
 *.pyc
 .venv/
+
 # Projet
 data/
 *.zip
 .DS_Store
 results_log.txt
+
+# Fichiers temporaires de compilation LaTeX
+*.aux
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.fls
+*.fdb_latexmk

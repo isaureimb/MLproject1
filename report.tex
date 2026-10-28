@@ -6,25 +6,24 @@
 \usepackage{microtype}
 \usepackage{url}
 
-\title{Predicting Coronary Heart Disease from Lifestyle Factors: A Robust Pipeline with Class-Imbalance Handling}
-\author{\IEEEauthorblockN{Lila Reinhardt, Isaure ..., Partner ...}
-\IEEEauthorblockA{Department of Computer Science / Life Sciences Engineering, EPFL, Switzerland}}
+\title{Predicting Coronary Heart Disease from Lifestyle Factors}
+\author{\IEEEauthorblockN{Isaure Imberton, Laetitia Espinosa, Lila Reinhardt}
+\IEEEauthorblockA{ EPFL, Switzerland}}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-Cardiovascular diseases (CVD), notably myocardial infarction and coronary heart disease (MICHD), represent a leading cause of mortality worldwide. In this work, we develop an end-to-end machine learning classification system using pure NumPy to predict MICHD occurrence from the Behavioral Risk Factor Surveillance System (BRFSS) dataset (over 300,000 respondents, 321 raw features). Our approach focuses on domain-informed preprocessing---specifically detecting survey sentinel missingness codes without manual codebook inspection---coupled with stratified handling of severe class imbalance ($\sim$9:1 ratio). We rigorously benchmark the six standard optimization methods and demonstrate that regularized logistic regression, augmented with class undersampling and threshold tuning on out-of-fold cross-validation scores, achieves an $F_1$-score of 0.395 (Accuracy 81.2\%), significantly outperforming naive baselines ($F_1 = 0.0$).
+Cardiovascular diseases (CVD), notably myocardial infarction and coronary heart disease (MICHD), represent a leading cause of mortality worldwide. In this work, we develop an end-to-end machine learning classification system using pure NumPy to predict MICHD occurrence from the Behavioral Risk Factor Surveillance System (BRFSS) dataset (over 300,000 respondents, 321 raw features). Our approach focuses on domain-informed preprocessing---specifically detecting survey sentinel missingness codes without manual codebook inspection---coupled with stratified handling of severe class imbalance ($\sim$9:1 ratio). We rigorously benchmark standard optimization methods and demonstrate that regularized logistic regression, augmented with class undersampling and threshold tuning on out-of-fold cross-validation scores, achieves an $F_1$-score of 0.408 (Accuracy 81.2\%), significantly outperforming naive baselines ($F_1 = 0.0$).
 \end{abstract}
 
 \section{Introduction}
 Cardiovascular diseases (CVD), particularly myocardial infarction and coronary heart disease (MICHD), are primary targets for preventive healthcare. The Behavioral Risk Factor Surveillance System (BRFSS) collected by the CDC records annual health behaviors, chronic conditions, and clinical indicators. Machine learning models trained on this survey can identify at-risk profiles early, enabling timely intervention.
 
-However, clinical survey datasets present three major hurdles for linear modeling:
+However, clinical survey datasets present deux major hurdles for linear modeling:
 \begin{enumerate}
     \item \textbf{High-dimensional sparsity and sentinel encoding:} The dataset comprises $N=328{,}135$ observations across $D=321$ initial features. Many survey questions employ arbitrary numeric codes (e.g., 7, 9, 77, 999) denoting ``refused'' or ``don't know'', which artificially distort distance metrics if treated as continuous values.
     \item \textbf{Acute class imbalance:} Only $\sim$8.8\% of survey respondents reported an MICHD event. Standard empirical risk minimization easily converges to the trivial majority classifier, attaining 91.2\% accuracy while failing to detect a single affected individual.
-    \item \textbf{Strict operational constraints:} All processing, linear solvers, optimization routines, and cross-validation pipelines must be implemented strictly using primitive NumPy operations without external learning libraries.
 \end{enumerate}
 This report details our modular pipeline, an automated gap-detection heuristic for sentinel codes, an empirical evaluation of six baseline methods, and an ablation study assessing data-cleaning and balancing strategies.
 
@@ -38,87 +37,91 @@ We consider binary classification where inputs are standardized design matrices 
     \mathcal{L}_{\text{MSE}}(w) = \frac{1}{2N} \| y - \tilde{X}w \|_2^2 + \lambda \|w\|_2^2.
 \end{equation}
 
-\textbf{Logistic Regression Model:} Models the posterior probability $p(y_i=1 \mid \tilde{x}_i) = \sigma(\tilde{x}_i w) = (1 + e^{-\tilde{x}_i w})^{-1}$. The optimal weights minimize the penalized negative log-likelihood (NLL):
+\textbf{Logistic Regression Model:} Models posterior probability $p(y_i=1 \mid \tilde{x}_i) = \sigma(\tilde{x}_i w) = (1 + e^{-\tilde{x}_i w})^{-1}$. The optimal weights minimize penalized negative log-likelihood (NLL):
 \begin{equation}
-    \mathcal{L}_{\text{NLL}}(w) = -\frac{1}{N} \sum_{i=1}^N \left[ y_i \ln \sigma(\tilde{x}_i w) + (1 - y_i) \ln (1 - \sigma(\tilde{x}_i w)) \right] + \lambda \|w\|_2^2.
+\begin{split}
+    \mathcal{L}_{\text{NLL}}(w) = & -\frac{1}{N} \sum_{i=1}^N \Big[ y_i \ln \sigma(\tilde{x}_i w) \\
+    & + (1 - y_i) \ln (1 - \sigma(\tilde{x}_i w)) \Big] + \lambda \|w\|_2^2.
+\end{split}
 \end{equation}
 
 \subsection{Optimization Methods}
 In accordance with course specifications, we implemented six standalone algorithms in \texttt{implementations.py}:
 \begin{itemize}
-    \item \textbf{Least Squares:} Closed-form solution via Cholesky/normal equations: $w = (\tilde{X}^T \tilde{X})^{-1} \tilde{X}^T y$, implemented using \texttt{np.linalg.solve}.
+    \item \textbf{Least Squares:} Closed-form solution via normal equations: $w = (\tilde{X}^T \tilde{X})^{-1} \tilde{X}^T y$, implemented using \texttt{np.linalg.solve}.
     \item \textbf{Ridge Regression:} Closed-form $L_2$-penalized regression: $w = (\tilde{X}^T \tilde{X} + 2N\lambda I)^{-1} \tilde{X}^T y$.
-    \item \textbf{MSE Gradient Descent (GD) and SGD:} Iterative first-order updates $w^{(t+1)} = w^{(t)} - \gamma \nabla \mathcal{L}(w^{(t)})$, with mini-batch size $B=1$ for SGD.
+    \item \textbf{MSE GD and SGD:} Iterative first-order updates $w^{(t+1)} = w^{(t)} - \gamma \nabla \mathcal{L}(w^{(t)})$, with mini-batch size $B=1$ for SGD.
     \item \textbf{Logistic Regression (GD):} Iterative updates using exact gradient $\nabla \mathcal{L} = \frac{1}{N} \tilde{X}^T (\sigma(\tilde{X}w) - y)$.
     \item \textbf{Regularized Logistic Regression (GD):} Incorporates weight penalty gradient $2\lambda w$ (excluding intercept).
 \end{itemize}
 
-\subsection{Automated Survey Sentinel Code Cleaning}
-Rather than manually inspecting 300 pages of the CDC codebook, we implemented an automated statistical heuristic (\texttt{clean\_special\_codes\_auto}). For each feature $j \in \{1, \dots, D\}$ computed solely on the training fold:
-\begin{itemize}
-    \item \textbf{Gap Analysis:} Candidate sentinel values $c \ge 77$ are classified as invalid non-responses if $c > 1.5 \times \max(X_{\cdot, j} \setminus \{c\})$. This reliably catches codes like 77 (refused) for bounded attributes (e.g., drinks per month $\le 30$).
-    \item \textbf{Categorical Refusal:} Values in $\{7, 9\}$ are marked invalid if the remaining unique entries satisfy $\max(X_{\cdot, j} \setminus \{c\}) \le 5$, characteristic of ordinal scales.
-\end{itemize}
-Identified values are replaced by \texttt{NaN}. Columns exceeding a missingness threshold ($>50\%$ NaNs) or near-zero variance ($\sigma^2 < 10^{-8}$) are discarded. Missing values are imputed using column-wise training medians, followed by zero-mean unit-variance standardization and bias term appending.
+\subsection{Data Preprocessing and Feature Pipeline}
+Raw telephone survey records contain extensive corruptions, unstandardized scales, and arbitrary coding artifacts that mislead gradient updates and linear solvers. We engineered a strictly leak-free preprocessing pipeline (\texttt{preprocess}), fitting all statistics exclusively on the training folds before applying them to validation and test partitions:
+
+\begin{enumerate}
+    \item \textbf{Heuristic Sentinel Value Sanitization:} The BRFSS survey encodes missing responses, refusals, and uncertainty with arbitrary numeric markers (e.g., $7, 9, 77, 99, 999$). Rather than relying on manual codebook mapping across 321 features, we deployed an automated rule-based detector (\texttt{clean\_special\_codes\_auto}):
+    \begin{itemize}
+        \item \emph{Continuous Gap Analysis:} For numeric attributes with candidate markers $c \in \{77, 99, 777, 999\}$, $c$ is marked as invalid if it creates a non-linear discontinuity, defined as $c > 1.5 \times \max(X_{\cdot, j} \setminus \{c\})$.
+        \item \emph{Ordinal Categorical Detection:} For discrete metrics bounded by small ranges ($\max(X_{\cdot, j} \setminus \{c\}) \le 5$), values in $\{7, 9\}$ are tagged as survey refusals rather than true numerical ratings.
+    \end{itemize}
+    Identified sentinel values are converted to \texttt{NaN}.
+
+    \item \textbf{Feature Pruning:} Attributes exhibiting extreme sparsity ($>50\%$ missing entries) or near-zero variance ($\sigma^2 < 10^{-8}$), which provide negligible discriminative signal and induce collinearity in $(\tilde{X}^T \tilde{X})$, are pruned, reducing feature dimensionality from $D=321$ to $D_{\text{clean}}$.
+
+    \item \textbf{Median Imputation:} Residual missing entries are imputed using the column-wise median of the training split, preserving ordinal ranks and mitigating distortion from skewed distributions.
+
+    \item \textbf{Feature Standardization (Z-score):} Continuous and ordinal variables are standardized to zero mean and unit variance ($\mu=0, \sigma=1$). This ensures conditioning of the Hessian matrix, preventing features with large scales from dominating gradient steps.
+
+    \item \textbf{Affine Bias Appending:} An intercept column of ones ($\mathbf{1}_N$) is appended as the leading column, yielding design matrices $\tilde{X} \in \mathbb{R}^{N \times (D_{\text{clean}}+1)}$.
+\end{enumerate}
 
 \subsection{Class-Imbalance Strategy and Threshold Tuning}
-Due to the $\sim$9:1 class disparity, we employ training-fold majority undersampling (\texttt{with\_undersampling}), enforcing a balanced 1:1 negative-to-positive ratio per training fold, leaving validation folds untouched. Furthermore, since maximum likelihood produces uncalibrated marginal probabilities under altered class priors, we tune the decision threshold $\tau \in [0, 1]$ directly on out-of-fold cross-validation scores using a fast $O(N \log N)$ cumulative sum scan to maximize the $F_1$-score:
+Due to the $\sim$9:1 class disparity, we evaluate both majority undersampling (1:1 ratio inside training folds) and post-hoc threshold tuning. Decision thresholds $\tau \in \mathbb{R}$ are calibrated on out-of-fold (OOF) cross-validation scores using a fast $O(N \log N)$ cumulative sum sweep to maximize the $F_1$-score:
 \begin{equation}
     F_1 = 2 \cdot \frac{\text{Precision} \cdot \text{Recall}}{\text{Precision} + \text{Recall}}.
 \end{equation}
 
 \section{Experimental Results and Discussion}
 
-All experiments are conducted using 5-fold stratified cross-validation (\texttt{seed=1}). Performance is evaluated via Accuracy, Precision, Recall, and $F_1$-score.
-
-\begin{table}[h]
+\begin{figure}[htbp]
 \centering
-\caption{Baseline comparison of official methods (5-fold CV).}
-\label{tab:baselines}
-\begin{tabular}{lcccc}
-\toprule
-\textbf{Method} & \textbf{Accuracy} & \textbf{Precision} & \textbf{Recall} & \textbf{$F_1$-Score} \\
-\midrule
-Majority Baseline ($\hat{y}=-1$) & 0.912 & 0.000 & 0.000 & 0.000 \\
-Least Squares & 0.884 & 0.281 & 0.219 & 0.246 \\
-Ridge ($\lambda = 10^{-2}$) & 0.885 & 0.285 & 0.214 & 0.244 \\
-MSE GD ($\gamma = 0.01, 100\text{ it.}$) & 0.880 & 0.264 & 0.228 & 0.244 \\
-Logistic Reg ($\gamma = 0.05, 300\text{ it.}$) & 0.893 & 0.320 & 0.201 & 0.247 \\
-Reg. Logistic ($\lambda = 10^{-4}$) & 0.894 & 0.325 & 0.205 & 0.251 \\
-\midrule
-\textbf{Reg. Logistic + Undersampling} & \textbf{0.812} & \textbf{0.298} & \textbf{0.584} & \textbf{0.395} \\
-\bottomrule
-\end{tabular}
-\end{table}
+\includegraphics[width=0.98\columnwidth]{baselines_comparison.png}
+\caption{Cross-validation performance (5-fold CV) across baseline models comparing standard accuracy ($\tau=0.5$), uncalibrated $F_1$-score ($\tau=0.5$), and optimal out-of-fold $F_1$-score ($\tau^*$).}
+\label{fig:baselines}
+\end{figure}
 
-\subsection{Baseline Comparison}
-Table~\ref{tab:baselines} contrasts the six required methods against our optimized pipeline. Without imbalance intervention, all models attain high accuracy ($\sim$89--91\%) but dismal $F_1$-scores ($\le 0.251$), suffering from severe false-negative rates ($Recall \approx 20\%$). Closed-form Ridge and Least Squares converge instantly, while Gradient Descent requires carefully tuned learning rates ($\gamma \approx 0.01$) to prevent divergence given non-convexities introduced by unscaled survey artifacts.
+\subsection{Baseline Evaluation and Threshold Calibration}
+Figure~\ref{fig:baselines} contrasts the performance across all evaluated baselines. Two core phenomena emerge:
+\begin{enumerate}
+    \item \textbf{Accuracy Paradox:} Every model trivially attains $\sim$91.2\% accuracy when evaluated with the standard threshold $\tau=0.5$ (matching the majority baseline), yet produces an $F_1$-score near zero ($F_1 < 0.01$ for linear regression; $F_1 \approx 0.138$ for logistic regression). This reveals that standard thresholds predict almost all individuals as negative, rendering the model useless for disease screening.
+    \item \textbf{Impact of Threshold Tuning:} Optimizing the decision threshold on OOF scores dramatically improves detection across all formulations, lifting the $F_1$-score to $\approx 0.407$ for Least Squares, Ridge, and Logistic models. Ridge regression demonstrates consistent robustness across $\lambda \in [10^{-6}, 10^{-2}]$ before performance slightly degrades at $\lambda = 1.0$ due to over-regularization.
+\end{enumerate}
 
 \subsection{Ablation Study}
-To isolate the marginal utility of each component, we performed an ablation study summarized in Table~\ref{tab:ablation}.
+To quantify the isolated benefits of our pipeline components, Table~\ref{tab:ablation} details the progression of the regularized logistic model.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \caption{Ablation study of pipeline components (Reg. Logistic).}
 \label{tab:ablation}
+\setlength{\tabcolsep}{4pt}
 \begin{tabular}{lccc}
 \toprule
-\textbf{Configuration} & \textbf{Accuracy} & \textbf{Recall} & \textbf{$F_1$-Score} \\
+\textbf{Configuration} & \textbf{Acc.} & \textbf{Recall} & \textbf{$F_1$} \\
 \midrule
 Raw Data (Mean Impute, No Cleaning) & 0.908 & 0.124 & 0.182 \\
 + Automated Sentinel Cleaning & 0.894 & 0.205 & 0.251 \\
-+ Undersampling (1:1 Ratio) & 0.771 & 0.762 & 0.371 \\
-+ Optimal Threshold Tuning ($\tau^* = 0.58$) & \textbf{0.812} & \textbf{0.584} & \textbf{0.395} \\
++ Optimal Threshold Tuning ($\tau^*$) & 0.887 & 0.382 & 0.408 \\
++ Undersampling (1:1 Ratio) & \textbf{0.812} & \textbf{0.584} & \textbf{0.395} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The ablation confirms that replacing sentinel codes with median imputation is crucial: it prevents codes like 999 from acting as spurious extreme regressors, raising $F_1$ from 0.182 to 0.251. Combining balanced training with decision-threshold calibration yields the most substantial leap in $F_1$ (+0.144), balancing precision and clinical sensitivity.
+The ablation shows that removing sentinel values prevents extreme numbers (e.g., 999) from distorting gradients, boosting baseline $F_1$. Crucially, combining threshold tuning or undersampling allows clinical sensitivity (Recall) to scale up to 58.4\%, establishing a clinically actionable predictor.
 
 \section{Conclusion and Reproducibility}
-By pairing careful data-sanitization heuristics with balanced gradient updates, we demonstrated that simple regularized linear models can achieve competitive predictive performance on massive, noisy survey datasets without non-linear libraries. Our complete experimental workflow, including baseline reproduction and the final competition submission generator, is fully self-contained in our accompanying \texttt{run.py} repository.
+By addressing survey sentinel artifacts and class imbalance via threshold calibration and balanced sampling, simple linear models achieve solid predictive performance without external ML frameworks. The complete pipeline is fully reproducible via \texttt{run.py}.
 
-\newpage
 \begin{thebibliography}{1}
 \bibitem{cdc2015}
 CDC, ``Behavioral Risk Factor Surveillance System Survey Data,'' \emph{U.S. Department of Health and Human Services}, 2015.
@@ -129,6 +132,3 @@ H.~He and E.~A. Garcia, ``Learning from imbalanced data,'' \emph{IEEE Trans. Kno
 \end{thebibliography}
 
 \end{document}
-
-
-
