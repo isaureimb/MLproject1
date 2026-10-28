@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+
 def explore_dimensions(y_train, x_train, x_test=None):
     """Compute and display dataset dimensions, shapes, and class distribution.
 
@@ -13,9 +14,13 @@ def explore_dimensions(y_train, x_train, x_test=None):
         N_train: number of training samples (int), number of rows
         D:number of features (int), number of columns
     """
-    assert (y_train.shape[0] == x_train.shape[0]), "y_train and x_train must have the same number of rows"
+    assert (
+        y_train.shape[0] == x_train.shape[0]
+    ), "y_train and x_train must have the same number of rows"
     if x_test is not None:
-        assert (x_train.shape[1] == x_test.shape[1]), "x_train and x_test must have the same number of features"
+        assert (
+            x_train.shape[1] == x_test.shape[1]
+        ), "x_train and x_test must have the same number of features"
 
     N_train, D = x_train.shape
     classes, counts = np.unique(y_train, return_counts=True)
@@ -29,6 +34,7 @@ def explore_dimensions(y_train, x_train, x_test=None):
         print(f"Test samples      (N_test) : {N_test}")
 
     return N_train, D
+
 
 import numpy as np
 
@@ -57,9 +63,9 @@ def clean_special_codes_auto(
         x_train_clean: np.ndarray, shape=(N_train, D)
         x_test_clean:  np.ndarray, shape=(N_test, D)
     """
-    
-    #assert (x_train.ndim == 2 and x_test.ndim == 2), "x_train and x_test must be 2D arrays"
-    #assert (x_train.shape[1] == x_test.shape[1]), "Feature count mismatch between train and test"
+
+    # assert (x_train.ndim == 2 and x_test.ndim == 2), "x_train and x_test must be 2D arrays"
+    # assert (x_train.shape[1] == x_test.shape[1]), "Feature count mismatch between train and test"
 
     x_train_clean = x_train.copy().astype(float)
     x_test_clean = x_test.copy().astype(float)
@@ -68,11 +74,11 @@ def clean_special_codes_auto(
 
     for j in range(n_features):
         col_train = x_train[:, j]
-        #take only the valid values of the column
-        valid_train = col_train[~np.isnan(col_train)] 
-        
-        #if there is only NaN values in the column, skip it
-        if len(valid_train) == 0: 
+        # take only the valid values of the column
+        valid_train = col_train[~np.isnan(col_train)]
+
+        # if there is only NaN values in the column, skip it
+        if len(valid_train) == 0:
             continue
 
         unique_vals = set(np.unique(valid_train))
@@ -88,7 +94,7 @@ def clean_special_codes_auto(
 
             max_rem = np.max(remaining)
 
-            # rules for detecting sentinel codes 
+            # rules for detecting sentinel codes
             is_large_gap = (code >= 77) and (code > max_rem * gap_ratio)
             is_categorical_refusal = (code in (7, 9)) and (max_rem <= 5)
 
@@ -97,7 +103,7 @@ def clean_special_codes_auto(
                 x_test_clean[x_test_clean[:, j] == code, j] = np.nan
 
     return x_train_clean, x_test_clean
-                
+
 
 def drop_useless_columns(x_train, x_test, missing_threshold=0.5, var_threshold=1e-8):
     """Drop columns with excessive NaN ratios or near-zero variance based on train set.
@@ -114,17 +120,23 @@ def drop_useless_columns(x_train, x_test, missing_threshold=0.5, var_threshold=1
         keep_columns:     np.ndarray of bool, shape=(D,)
     """
     assert x_train.ndim == 2 and x_test.ndim == 2, "Inputs must be 2D arrays"
-    assert x_train.shape[1] == x_test.shape[1], "Feature count mismatch between train and test"
+    assert (
+        x_train.shape[1] == x_test.shape[1]
+    ), "Feature count mismatch between train and test"
 
     N_train = x_train.shape[0]
 
     # Mask features exceeding the NaN ratio
-    nan_ratios = np.isnan(x_train).sum(axis=0) / N_train #np.isnan() is a boolean matrix
+    nan_ratios = (
+        np.isnan(x_train).sum(axis=0) / N_train
+    )  # np.isnan() is a boolean matrix
     valid_missing = nan_ratios <= missing_threshold
 
     # Mask constant or near-constant features
     variances = np.nanvar(x_train, axis=0)
-    valid_variance = ~np.isnan(variances) & (variances > var_threshold) #verify that columns is suficiently variable
+    valid_variance = ~np.isnan(variances) & (
+        variances > var_threshold
+    )  # verify that columns is suficiently variable
 
     keep_columns = valid_missing & valid_variance
 
@@ -199,6 +211,7 @@ def add_bias_term(x_train, x_test):
 
     return tx_train, tx_test
 
+
 def most_correlated_features(x, y, n_top=30):
     """Rank and plot the features by the strength of their linear correlation with the target.
 
@@ -215,7 +228,7 @@ def most_correlated_features(x, y, n_top=30):
 
     for j in range(x.shape[1]):
         col = x[:, j]
-        mask = ~np.isnan(col)  
+        mask = ~np.isnan(col)
 
         # Correlation is undefined if too few values or if one variable is constant
         if mask.sum() < 2 or np.std(col[mask]) == 0 or np.std(y[mask]) == 0:

@@ -1,6 +1,10 @@
 # Project 1 - Heart disease prediction
 
 Machine Learning course (CS-433), EPFL. We predict whether a person has heart disease (MICHD) from survey data (BRFSS 2015). Only NumPy and matplotlib are used.
+This repository contains the code for our first project within the course CS-433 - Machine Learning @ EPFL. 
+The goal was to develop a machine learning model that estimates the risk of developing **MICHD** (coronary heart disease or myocardial infarction) from the health-related survey answers of the Behavioral Risk Factor Surveillance System (BRFSS).
+
+All models were implemented from scratch using only NumPy: least squares, ridge regression, and (regularised) logistic regression. 
 
 ## Setup
 
@@ -16,7 +20,7 @@ Download x_train.csv, y_train.csv and x_test.csv from AIcrowd and put them in a 
 ## Run
 
 ```
-python run.py
+python run.ipynb
 ```
 
 This trains the final model and creates the csv file we submitted to AIcrowd. The random seed is fixed, so you get the same predictions every time.
@@ -29,7 +33,8 @@ This trains the final model and creates the csv file we submitted to AIcrowd. Th
 - `metrics.py`: accuracy, precision, recall and F1
 - `cross_validation.py`: k-fold split and cross-validation
 - `model_training.py`: baselines, threshold, class weights, grid search
-- `run.py`: final predictions
+- `experiments.ipynb` : test of different models accuracy
+- `run.ipynb`: final predictions
 
 ## Authors
 

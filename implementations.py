@@ -39,30 +39,21 @@ def batch_iter(y, tx, batch_size, num_batches=1, shuffle=True):
     for minibatch_y, minibatch_tx in batch_iter(y, tx, 32):
         <DO-SOMETHING>
     """
-    data_size = len(y)  # NUmber of data points.
-    batch_size = min(data_size, batch_size)  # Limit the possible size of the batch.
-    max_batches = int(
-        data_size / batch_size
-    )  # The maximum amount of non-overlapping batches that can be extracted from the data.
-    remainder = (
-        data_size - max_batches * batch_size
-    )  # Points that would be excluded if no overlap is allowed.
+    data_size = len(y)
+    batch_size = min(data_size, batch_size)
+    max_batches = int(data_size / batch_size)
+    remainder = data_size - max_batches * batch_size
 
     if shuffle:
-        # Generate an array of indexes indicating the start of each batch
         idxs = np.random.randint(max_batches, size=num_batches) * batch_size
         if remainder != 0:
-            # Add an random offset to the start of each batch to eventually consider the remainder points
             idxs += np.random.randint(remainder + 1, size=num_batches)
     else:
-        # If no shuffle is done, the array of indexes is circular.
         idxs = np.array([i % max_batches for i in range(num_batches)]) * batch_size
 
     for start in idxs:
-        start_index = start  # The first data point of the batch
-        end_index = (
-            start_index + batch_size
-        )  # The first data point of the following batch
+        start_index = start
+        end_index = start_index + batch_size
         yield y[start_index:end_index], tx[start_index:end_index]
 
 
@@ -86,7 +77,7 @@ def mean_squared_error_gd(y, tx, initial_w, max_iters, gamma):
     for n_iter in range(max_iters):
         grad, err = compute_gradient(y, tx, w)
         w = w - gamma * grad
-    loss = compute_loss(y, tx, w)  # loss des poids finaux
+    loss = compute_loss(y, tx, w)
     return w, loss
 
 
@@ -195,6 +186,21 @@ def sigmoid(t):
     return (1 + np.exp(-t)) ** (-1)
 
 
+def stable_sigmoid(t):
+    """Sigmoid function, clipped to avoid overflow in np.exp for large |t|.
+
+    Clipping t to [-30, 30] does not change the result in practice
+    (sigmoid(30) = 1 up to ~1e-13).
+
+    Args:
+        t: numpy array (any shape).
+
+    Returns:
+        numpy array of the same shape, values in (0, 1).
+    """
+    return 1.0 / (1.0 + np.exp(-np.clip(t, -30, 30)))
+
+
 def compute_gradient_logistic(y, tx, w):
     """compute the gradient of loss.
 
@@ -267,3 +273,32 @@ def reg_logistic_regression(y, tx, lambda_, initial_w, max_iters, gamma):
     loss = compute_logistic_loss(y, tx, w)
 
     return w, loss
+
+
+def weighted_logistic_gd(y, tx, lambda_, max_iters, gamma, pos_weight):
+    """regularised logistic regression (GD) with a larger weight on the positive class.
+
+    Args:
+        y: numpy array of shape (N,), labels in {0, 1}.
+        tx: numpy array of shape (N, D), features, with the bias column
+            (column of ones) in first position.
+        lambda_: float, regularisation strength.
+        max_iters: int, number of gradient descent steps.
+        gamma: float, step size.
+        pos_weight: float, weight of the positive samples relative to the
+            negative ones (1.0 = standard regularised logistic regression).
+
+    Returns:
+        w: numpy array of shape (D,), the final weights.
+    """
+
+    c = np.where(y == 1, pos_weight, 1.0)
+    c = c / c.mean()
+    w = np.zeros(tx.shape[1])
+    reg_mask = np.ones_like(w)
+    reg_mask[0] = 0.0
+    for _ in range(max_iters):
+        grad = tx.T @ (c * (stable_sigmoid(tx @ w) - y)) / len(y)
+        grad += 2 * lambda_ * reg_mask * w
+        w = w - gamma * grad
+    return w

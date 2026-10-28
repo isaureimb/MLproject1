@@ -17,10 +17,36 @@ def build_k_indices(y, k_fold, seed=1):
     folds = [[] for _ in range(k_fold)]
     for mask in (positive, ~positive):
         idx = rng.permutation(np.where(mask)[0])
-        # split each class separately so every fold gets the same class ratio
         for k, chunk in enumerate(np.array_split(idx, k_fold)):
             folds[k].append(chunk)
     return [np.concatenate(f) for f in folds]
+
+
+def stratified_subsample(y01, n_max, seed=1):
+    """Draw a random subsample of about n_max samples, keeping the class proportions.
+
+    Used to speed up the hyper-parameter search: Sampling each class separately ("stratified" sampling)
+    keeps the same proportion of positive samples (people with MICHD) as in the full dataset, so that the
+    results on the subsample stay representative.
+
+    Args:
+        y01: numpy array of shape (N,), labels in {0, 1}.
+        n_max: approximate size of the subsample. If None or larger than N,
+            all the samples are kept.
+        seed: random seed, for reproducibility.
+
+    Returns:
+        numpy array of shape (~n_max,), sorted indices of the selected samples.
+    """
+    if n_max is None or n_max >= len(y01):
+        return np.arange(len(y01))
+    rng = np.random.RandomState(seed)
+    frac = n_max / len(y01)
+    idx = []
+    for cls in (0, 1):
+        c = np.where(y01 == cls)[0]
+        idx.append(rng.choice(c, size=int(len(c) * frac), replace=False))
+    return np.sort(np.concatenate(idx))
 
 
 def cross_validation(y, x, k_fold, seed, model_train, score_function):
