@@ -29,57 +29,32 @@ This report details our modular pipeline, an automated gap-detection heuristic f
 
 \section{Models and Methods}
 
-\subsection{Underlying Mathematical Models}
-We consider binary classification where inputs are standardized design matrices $\tilde{X} \in \mathbb{R}^{N \times (D+1)}$ (including an intercept column of ones) and binary targets $y \in \{-1, +1\}$, mapped to $y \in \{0, 1\}$ for probabilistic models.
 
-\textbf{Linear Ridge Model:} Assumes a continuous output $\hat{y} = \tilde{X}w$ minimizing regularized Mean Squared Error (MSE):
-\begin{equation}
-    \mathcal{L}_{\text{MSE}}(w) = \frac{1}{2N} \| y - \tilde{X}w \|_2^2 + \lambda \|w\|_2^2.
-\end{equation}
+\subsection{Baseline Models}
+To judge how much each improvement brings, we first evaluate simple reference models. A \emph{majority-class classifier} that always answers ``healthy'' reaches an accuracy of over 91\,\% but detects no sick person, which shows that accuracy is misleading on this dataset. We then train the four methods of the course: \emph{least squares}, \emph{ridge regression}, \emph{logistic regression} and \emph{regularized logistic regression}, the two logistic models being trained by gradient descent. Labels are converted from $\{-1,1\}$ to $\{0,1\}$ for training and converted back for the submission.
 
-\textbf{Logistic Regression Model:} Models posterior probability $p(y_i=1 \mid \tilde{x}_i) = \sigma(\tilde{x}_i w) = (1 + e^{-\tilde{x}_i w})^{-1}$. The optimal weights minimize penalized negative log-likelihood (NLL):
-\begin{equation}
-\begin{split}
-    \mathcal{L}_{\text{NLL}}(w) = & -\frac{1}{N} \sum_{i=1}^N \Big[ y_i \ln \sigma(\tilde{x}_i w) \\
-    & + (1 - y_i) \ln (1 - \sigma(\tilde{x}_i w)) \Big] + \lambda \|w\|_2^2.
-\end{split}
-\end{equation}
+\subsection{Validation Protocol}
+All models are evaluated with stratified 5-fold cross-validation: the data is split into 5 folds that all contain the same share of positives, and each fold is scored by a model trained on the other four. Every person thus receives an \emph{out-of-fold} score from a model that has never seen them, and all metrics are computed on these scores. The random seed is fixed so that the splits are reproducible. We report accuracy, precision (share of predicted positives that are truly positive), recall (share of true positives that are found) and the F1-score
+\begin{equation*}
+F_1 = \frac{2\cdot \text{precision}\cdot \text{recall}}{\text{precision}+\text{recall}},
+\end{equation*}
+which is high only if both precision and recall are high. The AIcrowd score is used only as a final check, never to choose the model.
 
-\subsection{Optimization Methods}
-In accordance with course specifications, we implemented six standalone algorithms in \texttt{implementations.py}:
-\begin{itemize}
-    \item \textbf{Least Squares:} Closed-form solution via normal equations: $w = (\tilde{X}^T \tilde{X})^{-1} \tilde{X}^T y$, implemented using \texttt{np.linalg.solve}.
-    \item \textbf{Ridge Regression:} Closed-form $L_2$-penalized regression: $w = (\tilde{X}^T \tilde{X} + 2N\lambda I)^{-1} \tilde{X}^T y$.
-    \item \textbf{MSE GD and SGD:} Iterative first-order updates $w^{(t+1)} = w^{(t)} - \gamma \nabla \mathcal{L}(w^{(t)})$, with mini-batch size $B=1$ for SGD.
-    \item \textbf{Logistic Regression (GD):} Iterative updates using exact gradient $\nabla \mathcal{L} = \frac{1}{N} \tilde{X}^T (\sigma(\tilde{X}w) - y)$.
-    \item \textbf{Regularized Logistic Regression (GD):} Incorporates weight penalty gradient $2\lambda w$ (excluding intercept).
+\subsection{Handling the Class Imbalance}
+Only about 9\,\% of the people are positive, so a model trained on the raw data tends to answer ``healthy'' almost everywhere. We test three remedies:
+\begin{itemize}\itemsep0pt
+  \item \textbf{Threshold tuning.} Instead of the default threshold of 0.5, we choose the threshold that maximizes the F1-score on the out-of-fold scores.
+  \item \textbf{Class weights.} In the loss, an error on a positive counts several times more than an error on a negative, so that the model cannot ignore the minority class.
+  \item \textbf{Undersampling.} We keep all positives and an equal number of randomly chosen negatives to train the model. This is done inside each training fold only, so that validation folds keep the true class proportions.
 \end{itemize}
 
-\subsection{Data Preprocessing and Feature Pipeline}
-Raw telephone survey records contain extensive corruptions, unstandardized scales, and arbitrary coding artifacts that mislead gradient updates and linear solvers. We engineered a strictly leak-free preprocessing pipeline (\texttt{preprocess}), fitting all statistics exclusively on the training folds before applying them to validation and test partitions:
+\subsection{Hyperparameter Selection}
+The regularization strength $\lambda$, the gradient step size $\gamma$ and the weight $c_+$ of the positive class are chosen by grid search with the cross-validation above, keeping the combination with the best F1-score. We test $\lambda \in \{10^{-6},\dots,10^{-1}\}$ (6 log-spaced values), $\gamma \in \{0.1, 0.3\}$ and $c_+ \in \{1, 3, 8\}$, with 300 gradient steps ($c_+ = 1$ means no weighting).
+% CHECK: these values are the defaults of the grid search; make them match what was really run
+% (your teammates' baseline table uses gamma = 0.05). If the grid ran on a subsample of 60 000 rows, say so here.
 
-\begin{enumerate}
-    \item \textbf{Heuristic Sentinel Value Sanitization:} The BRFSS survey encodes missing responses, refusals, and uncertainty with arbitrary numeric markers (e.g., $7, 9, 77, 99, 999$). Rather than relying on manual codebook mapping across 321 features, we deployed an automated rule-based detector (\texttt{clean\_special\_codes\_auto}):
-    \begin{itemize}
-        \item \emph{Continuous Gap Analysis:} For numeric attributes with candidate markers $c \in \{77, 99, 777, 999\}$, $c$ is marked as invalid if it creates a non-linear discontinuity, defined as $c > 1.5 \times \max(X_{\cdot, j} \setminus \{c\})$.
-        \item \emph{Ordinal Categorical Detection:} For discrete metrics bounded by small ranges ($\max(X_{\cdot, j} \setminus \{c\}) \le 5$), values in $\{7, 9\}$ are tagged as survey refusals rather than true numerical ratings.
-    \end{itemize}
-    Identified sentinel values are converted to \texttt{NaN}.
-
-    \item \textbf{Feature Pruning:} Attributes exhibiting extreme sparsity ($>50\%$ missing entries) or near-zero variance ($\sigma^2 < 10^{-8}$), which provide negligible discriminative signal and induce collinearity in $(\tilde{X}^T \tilde{X})$, are pruned, reducing feature dimensionality from $D=321$ to $D_{\text{clean}}$.
-
-    \item \textbf{Median Imputation:} Residual missing entries are imputed using the column-wise median of the training split, preserving ordinal ranks and mitigating distortion from skewed distributions.
-
-    \item \textbf{Feature Standardization (Z-score):} Continuous and ordinal variables are standardized to zero mean and unit variance ($\mu=0, \sigma=1$). This ensures conditioning of the Hessian matrix, preventing features with large scales from dominating gradient steps.
-
-    \item \textbf{Affine Bias Appending:} An intercept column of ones ($\mathbf{1}_N$) is appended as the leading column, yielding design matrices $\tilde{X} \in \mathbb{R}^{N \times (D_{\text{clean}}+1)}$.
-\end{enumerate}
-
-\subsection{Class-Imbalance Strategy and Threshold Tuning}
-Due to the $\sim$9:1 class disparity, we evaluate both majority undersampling (1:1 ratio inside training folds) and post-hoc threshold tuning. Decision thresholds $\tau \in \mathbb{R}$ are calibrated on out-of-fold (OOF) cross-validation scores using a fast $O(N \log N)$ cumulative sum sweep to maximize the $F_1$-score:
-\begin{equation}
-    F_1 = 2 \cdot \frac{\text{Precision} \cdot \text{Recall}}{\text{Precision} + \text{Recall}}.
-\end{equation}
+\subsection{Final Model}
+The best configuration is retrained on the whole training set. Its predictions on the test set use the threshold selected on the out-of-fold scores, and are converted back to $\{-1,1\}$ for submission.
 
 \section{Experimental Results and Discussion}
 
